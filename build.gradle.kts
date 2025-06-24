@@ -4,16 +4,14 @@ import dev.dediamondpro.buildsource.VersionRange
 
 plugins {
     alias(libs.plugins.arch.loom)
-    alias(libs.plugins.publishing)
+    // Removed publishing plugin
 }
 
 buildscript {
-    // Set loom platform to correct loader
     extra["loom.platform"] = project.name.split('-')[1]
 }
 
 val mcPlatform = Platform.fromProject(project)
-
 val mod_name: String by project
 val mod_version: String by project
 val mod_id: String by project
@@ -43,40 +41,34 @@ stonecutter {
 }
 
 val mcVersion = VersionDefinition(
-    "1.21.4" to VersionRange("1.21.3", "1.21.4", name = "1.21.4"),
+    "1.21.6" to VersionRange("1.21.6", "1.21.6", name = "1.21.6"),
 )
 val parchmentVersion = VersionDefinition(
-    "1.20.1" to "1.20.1:2023.09.03",
-    "1.21.1" to "1.21.1:2024.11.17",
-    "1.21.4" to "1.21.4:2025.02.16"
+    "1.21.5" to "1.21.5:2025.06.15",
+    "1.21.6" to "1.21.5:2025.06.15", // reuse latest mapping
 )
 val fabricApiVersion = VersionDefinition(
-    "1.20.1" to "0.92.3+1.20.1",
-    "1.21.1" to "0.114.0+1.21.1",
-    "1.21.4" to "0.118.0+1.21.4",
-    "1.21.5" to "0.119.4+1.21.5",
+    "1.21.6" to "0.128.0+1.21.6",
 )
 val modMenuVersion = VersionDefinition(
-    "1.20.1" to "7.2.2",
-    "1.21.1" to "11.0.3",
-    "1.21.4" to "13.0.2",
-    "1.21.5" to "14.0.0-rc.2",
+    "1.21.6" to "15.0.0-beta.3",
 )
 val neoForgeVersion = VersionDefinition(
-    "1.21.4" to "21.4.124",
+    "1.21.6" to "21.6.15-beta",
 )
 val yaclVersion = VersionDefinition(
-    "1.21.4-fabric" to "3.6.6+1.21.4-fabric",
-    "1.21.4-neoforge" to "3.6.6+1.21.4-neoforge"
+    "1.21.6-fabric" to "3.7.1+1.21.6-fabric",
+    "1.21.6-neoforge" to "3.7.1+1.21.6-neoforge",
 )
-val noChatReportsVersion = VersionDefinition(
-    "1.21.4-fabric" to "Fabric-1.21.4-v2.11.0",
-    "1.21.4-neoforge" to "NeoForge-1.21.4-v2.11.0",
-)
+
+// As of now this mod is not available on 1.21.6
+//val noChatReportsVersion = VersionDefinition(
+//    "1.21.4-fabric" to "Fabric-1.21.4-v2.11.0",
+//    "1.21.4-neoforge" to "NeoForge-1.21.4-v2.11.0",
+//)
 
 dependencies {
     minecraft("com.mojang:minecraft:${mcPlatform.versionString}")
-
     @Suppress("UnstableApiUsage")
     mappings(loom.layered {
         officialMojangMappings()
@@ -86,8 +78,7 @@ dependencies {
     })
 
     if (mcPlatform.isFabric) {
-        modImplementation("net.fabricmc:fabric-loader:0.16.10")
-
+        modImplementation("net.fabricmc:fabric-loader:0.16.14")
         modImplementation("net.fabricmc.fabric-api:fabric-api:${fabricApiVersion.get(mcPlatform)}")
         modImplementation("com.terraformersmc:modmenu:${modMenuVersion.get(mcPlatform)}")
     } else if (mcPlatform.isNeoForge) {
@@ -97,20 +88,17 @@ dependencies {
     modImplementation("dev.isxander:yet-another-config-lib:${yaclVersion.get(mcPlatform)}")
     compileOnly(libs.objc)
 
-    // Compat mods
-    noChatReportsVersion.getOrNull(mcPlatform)?.let {
-        modCompileOnly("maven.modrinth:no-chat-reports:${it}")
-    }
+//    noChatReportsVersion.getOrNull(mcPlatform)?.let {
+//        modCompileOnly("maven.modrinth:no-chat-reports:$it")
+//    }
 }
 
 loom {
     accessWidenerPath = rootProject.file("src/main/resources/chatshot.accesswidener")
-
     if (mcPlatform.isForge) forge {
         convertAccessWideners.set(true)
         mixinConfig("mixins.resourcify.json")
     }
-
     runConfigs["client"].isIdeConfigGenerated = true
 }
 
@@ -120,57 +108,9 @@ base.archivesName.set(
     }-${mcPlatform.loaderString})-$mod_version"
 )
 
-publishMods {
-    file.set(tasks.remapJar.get().archiveFile)
-    displayName.set("[${mcVersion.get(mcPlatform).getName()}-${mcPlatform.loaderString}] $mod_name $mod_version")
-    version.set(mod_version)
-    changelog.set(rootProject.file("changelog.md").readText())
-    type.set(STABLE)
-
-    modLoaders.add(mcPlatform.loaderString)
-    if (mcPlatform.isFabric) modLoaders.add("quilt")
-
-    curseforge {
-        projectId.set("908966")
-        accessToken.set(System.getenv("CURSEFORGE_TOKEN"))
-
-        minecraftVersionRange {
-            start = mcVersion.get(mcPlatform).startVersion
-            end = mcVersion.get(mcPlatform).endVersion
-        }
-
-        if (mcPlatform.isFabric) {
-            requires("fabric-api", "yacl")
-        } else if (mcPlatform.isForgeLike) {
-            requires("yacl")
-        }
-    }
-    modrinth {
-        projectId.set("X2Zy7Oi6")
-        accessToken.set(System.getenv("MODRINTH_TOKEN"))
-
-        minecraftVersionRange {
-            start = mcVersion.get(mcPlatform).startVersion
-            end = mcVersion.get(mcPlatform).endVersion
-        }
-
-        if (mcPlatform.isFabric) {
-            requires("fabric-api", "yacl")
-        } else if (mcPlatform.isForgeLike) {
-            requires("yacl")
-        }
-    }
-}
-
 tasks {
-    remapJar {
-        finalizedBy("copyJar")
-        if (mcPlatform.isNeoForge) {
-            atAccessWideners.add("chatshot.accesswidener")
-        }
-    }
     register<Copy>("copyJar") {
-        File("${project.rootDir}/jars").mkdir()
+        File("${project.rootDir}/jars").mkdirs()
         from(remapJar.get().archiveFile)
         into("${project.rootDir}/jars")
     }
@@ -182,15 +122,19 @@ tasks {
             "version" to mod_version,
             "mcVersion" to mcVersion.get(mcPlatform).getLoaderRange(mcPlatform),
         )
-
         properties.forEach { (k, v) -> inputs.property(k, v) }
         filesMatching(listOf("mcmod.info", "META-INF/mods.toml", "META-INF/neoforge.mods.toml", "fabric.mod.json")) {
             expand(properties)
         }
-
         if (!mcPlatform.isFabric) exclude("fabric.mod.json")
         if (!mcPlatform.isForgeLike) exclude("pack.mcmeta")
         if (!mcPlatform.isNeoForge) exclude("META-INF/neoforge.mods.toml")
+    }
+    remapJar {
+        finalizedBy("copyJar")
+        if (mcPlatform.isNeoForge) {
+            atAccessWideners.add("chatshot.accesswidener")
+        }
     }
     withType<Jar> {
         from(rootProject.file("LICENSE"))

@@ -16,10 +16,11 @@ import net.minecraft.client.GuiMessage;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.Screenshot;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.render.state.GuiRenderState;
 import net.minecraft.client.renderer.MultiBufferSource;
-import net.minecraft.client.renderer.RenderStateShard;
 import net.minecraft.client.renderer.RenderType;
 import net.minecraft.network.chat.Component;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.util.FormattedCharSequence;
 import org.lwjgl.glfw.GLFW;
 
@@ -33,24 +34,29 @@ import java.io.IOException;
 import java.nio.channels.Channels;
 import java.nio.channels.WritableByteChannel;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
 
 public class ChatCopyUtil {
 
-    static public RenderType CUSTOM_TEXT_LAYER = RenderType.create(
-            "chatshot_text",
-            DefaultVertexFormat.POSITION_COLOR_TEX_LIGHTMAP,
-            VertexFormat.Mode.QUADS,
-            786432,
-            RenderType.CompositeState.builder()
-                    .setShaderState(RenderStateShard.RENDERTYPE_TEXT_SHADER)
-                    .setTransparencyState(RenderStateShard.TRANSLUCENT_TRANSPARENCY)
-                    .setLightmapState(RenderStateShard.LIGHTMAP)
-                    .setCullState(RenderStateShard.NO_CULL)
-                    .setLayeringState(RenderStateShard.VIEW_OFFSET_Z_LAYERING)
-                    .setOutputState(new RenderStateShard.OutputStateShard("chatshot_fbo", () -> {
-                    }, () -> {
-                    }))
-                    .createCompositeState(false));
+//    static public RenderType CUSTOM_TEXT_LAYER = RenderType.create(
+//            "chatshot_text",
+//            786432,
+//            RenderPipelines.TEXT,
+//            RenderType.CompositeState.builder()
+////                    .setShaderState(RenderStateShard.RENDERTYPE_TEXT_SHADER)
+////                    .setTransparencyState(RenderStateShard.TRANSLUCENT_TRANSPARENCY)
+//                    .setLightmapState(RenderStateShard.LIGHTMAP)
+////                    .setCullState(RenderStateShard.NO_CULL)
+//                    .setLayeringState(RenderStateShard.VIEW_OFFSET_Z_LAYERING)
+//                    .setOutputState(new RenderStateShard.OutputStateShard("chatshot_fbo", () -> {
+//                        return
+//                    }))
+//                    .setOutputState(new RenderStateShard.OutputStateShard("chatshot_fbo", () -> {
+//                        return );
+//                    }, () -> {
+//                    }))
+//                    .createCompositeState(false));
+//            )
 
     public static void copy(List<GuiMessage.Line> lines, Minecraft client) {
         if (GLFW.glfwGetKey(client.getWindow().getWindow(), GLFW.GLFW_KEY_LEFT_SHIFT) == GLFW.GLFW_PRESS || GLFW.glfwGetKey(client.getWindow().getWindow(), GLFW.GLFW_KEY_RIGHT_SHIFT) == GLFW.GLFW_PRESS) {
@@ -74,12 +80,12 @@ public class ChatCopyUtil {
     }
 
     public static class OverrideVertexProvider extends MultiBufferSource.BufferSource {
-        private RenderType currentLayer = CUSTOM_TEXT_LAYER;
+        private RenderType currentLayer = RenderType.text(ResourceLocation.read("minecraft").getOrThrow());
         public BufferBuilder bufferBuilder;
 
         private OverrideVertexProvider(ByteBufferBuilder bufferAllocator) {
             super(bufferAllocator, Object2ObjectSortedMaps.emptyMap());
-            this.bufferBuilder = new BufferBuilder(this.sharedBuffer, CUSTOM_TEXT_LAYER.mode(), CUSTOM_TEXT_LAYER.format());
+            this.bufferBuilder = new BufferBuilder(this.sharedBuffer, currentLayer.mode(), currentLayer.format());
         }
 
         @Override
@@ -115,15 +121,14 @@ public class ChatCopyUtil {
             return;
         }
         OverrideVertexProvider customConsumer = new OverrideVertexProvider(new ByteBufferBuilder(256));
-        customConsumer.getBuffer(CUSTOM_TEXT_LAYER);
-        GuiGraphics context = new GuiGraphics(client, customConsumer);
+        customConsumer.getBuffer(RenderType.text(ResourceLocation.read("minecraft").getOrThrow()));
+        GuiGraphics context = new GuiGraphics(client, new GuiRenderState());
 
         context.pose().scale(
                 (float) client.getWindow().getGuiScaledWidth() / width,
-                (float) client.getWindow().getGuiScaledHeight() / height,
-                1f
+                (float) client.getWindow().getGuiScaledHeight() / height
         );
-        fb.bindWrite(false);
+//        fb.bindWrite(false);
         int y = 0;
         for (GuiMessage.Line line : lines) {
             context.drawString(client.font, line.content(), 0, y, 0xFFFFFF, shadow);
@@ -132,44 +137,47 @@ public class ChatCopyUtil {
 
         // Force mods doing things like hud-batching to draw immediately
         CompatCore.INSTANCE.drawChatHud();
-        context.flush();
+        context.nextStratum();
         customConsumer.finish_drawing();
 
-        fb.unbindWrite();
-        try (NativeImage nativeImage = Screenshot.takeScreenshot(fb)) {
-            ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+//        fb.unbindWrite();
+        Screenshot.takeScreenshot(fb, (NativeImage nativeImage) -> {
+            try {
+                ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
 
-            WritableByteChannel writableChannel = Channels.newChannel(outputStream);
-            nativeImage.writeToChannel(writableChannel);
-            writableChannel.close();
+                WritableByteChannel writableChannel = Channels.newChannel(outputStream);
+                nativeImage.writeToChannel(writableChannel);
 
-            ByteArrayInputStream inputStream = new ByteArrayInputStream(outputStream.toByteArray());
-            BufferedImage image = ImageIO.read(inputStream);
+                writableChannel.close();
 
-            BufferedImage transparentImage = imageToBufferedImage(makeColorTransparent(image, new Color(0x36, 0x39, 0x3F)));
-            boolean copySuccessfull = false;
-            if (Config.INSTANCE.saveImage || MacosUtil.IS_MACOS) {
-                File screenShotDir = new File("screenshots/chat");
-                screenShotDir.mkdirs();
-                File screenshotFile = getScreenshotFilename(screenShotDir);
-                ImageIO.write(transparentImage, "png", screenshotFile);
-                if (MacosUtil.IS_MACOS) {
-                    copySuccessfull = MacOSCompat.doCopyMacOS(screenshotFile.getAbsolutePath());
-                    if (!Config.INSTANCE.saveImage) screenshotFile.delete();
+                ByteArrayInputStream inputStream = new ByteArrayInputStream(outputStream.toByteArray());
+                BufferedImage image = ImageIO.read(inputStream);
+
+                BufferedImage transparentImage = imageToBufferedImage(makeColorTransparent(image, new Color(0x36, 0x39, 0x3F)));
+                boolean copySuccessfull = false;
+                if (Config.INSTANCE.saveImage || MacosUtil.IS_MACOS) {
+                    File screenShotDir = new File("screenshots/chat");
+                    screenShotDir.mkdirs();
+                    File screenshotFile = getScreenshotFilename(screenShotDir);
+                    ImageIO.write(transparentImage, "png", screenshotFile);
+                    if (MacosUtil.IS_MACOS) {
+                        copySuccessfull = MacOSCompat.doCopyMacOS(screenshotFile.getAbsolutePath());
+                        if (!Config.INSTANCE.saveImage) screenshotFile.delete();
+                    }
                 }
+                if (!MacosUtil.IS_MACOS) copySuccessfull = ClipboardUtil.copy(transparentImage);
+                Component message = null;
+                if (copySuccessfull) {
+                    if (Config.INSTANCE.showCopyMessage) message = Component.translatable("chatshot.image.success");
+                } else {
+                    message = Component.translatable("chatshot.image.fail");
+                }
+                if (message != null) client.gui.getChat().addMessage(message);
+            } catch (IOException e) {
+                e.printStackTrace();
             }
-            if (!MacosUtil.IS_MACOS) copySuccessfull = ClipboardUtil.copy(transparentImage);
-            Component message = null;
-            if (copySuccessfull) {
-                if (Config.INSTANCE.showCopyMessage) message = Component.translatable("chatshot.image.success");
-            } else {
-                message = Component.translatable("chatshot.image.fail");
-            }
-            if (message != null) client.gui.getChat().addMessage(message);
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-        client.getMainRenderTarget().bindWrite(true);
+        });
+//        client.getMainRenderTarget().bindWrite(true);
     }
 
     private static File getScreenshotFilename(File directory) {
@@ -183,9 +191,9 @@ public class ChatCopyUtil {
     }
 
     private static RenderTarget createBuffer(int width, int height) {
-        RenderTarget fb = new TextureTarget(width, height, true);
-        fb.setClearColor(0x36 / 255f, 0x39 / 255f, 0x3F / 255f, 0f);
-        fb.clear();
+        RenderTarget fb = new TextureTarget("target", width, height, true);
+//        fb.setClearColor(0x36 / 255f, 0x39 / 255f, 0x3F / 255f, 0f);
+//        fb.clear();
         return fb;
     }
 
